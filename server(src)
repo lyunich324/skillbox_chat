@@ -1,0 +1,69 @@
+
+#
+from twisted.internet import reactor
+from twisted.internet.protocol import ServerFactory, connectionDone
+from twisted.protocols.basic import LineOnlyReceiver
+
+
+class ServerProtocol(LineOnlyReceiver):
+    factory: 'Server'
+    login: str = None
+
+    def connectionMade(self):
+        # Потенциальный баг для внимательных =)
+        self.factory.clients.append(self)
+
+    def connectionLost(self, reason=connectionDone):
+        self.factory.clients.remove(self)
+
+    def lineReceived(self, line: bytes):
+        content = line.decode()
+
+        if self.login is not None:
+            content = f"Message from {self.login}: {content}"
+
+            if len(self.factory.history) > 9:
+                self.facroty.history.pop(0)
+
+            self.factory.history.append(content.encode())
+
+            for user in self.factory.logins:
+                if user is not self.login:
+                    user.sendLine(content.encode())
+        else:
+            # login:admin -> admin
+            if content.startswith("login:"):
+                self.login = content.replace("login:", "")
+                if login in self.factory.logins == self.login:
+                    self.sendLine(f"Login {login} is used already")
+                    self.transport.loseConnection()
+                    print(f"Unauthorized access via {login}, connection broken")
+                else:
+                    self.login = login
+                    self.factory.logins.append(login)
+                    print(f"New user {login}")
+                    self.sendLine("Welcome!".encode())
+                    self.send_history()
+            else:
+                self.sendLine("Invalid login".encode())
+
+
+class Server(ServerFactory):
+    protocol = ServerProtocol
+    clients: list
+    logins: list
+    history: list
+
+
+    def startFactory(self):
+        self.clients = []
+        self.logins = []
+        self.history = []
+        print("Server started")
+
+    def stopFactory(self):
+        print("Server closed")
+
+
+reactor.listenTCP(1234, Server())
+reactor.run()
